@@ -4,8 +4,92 @@ import React, { Component } from 'react'
 import { Provider } from 'react-redux'
 import RootContainer from './RootContainer'
 import createStore from '../Redux'
-import { graphql } from 'react-apollo'
-import {getUserInfo} from '../../Services/GraphQLQuery'
+import { ApolloProvider } from 'react-apollo';
+import ApolloClient from 'apollo-client';
+import { AsyncStorage } from 'react-native';
+import { InMemoryCache, defaultDataIdFromObject } from 'apollo-cache-inmemory';
+import { persistCache } from 'apollo-cache-persist';
+import { HttpLink } from 'apollo-link-http';
+import { setContext } from 'apollo-link-context';
+import { onError } from 'apollo-link-error';
+
+const cache = new InMemoryCache();
+
+
+const defaultOptions = {
+  watchQuery: {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'ignore',
+  },
+  query: {
+    fetchPolicy: 'network-only',
+    errorPolicy: 'ignore',
+  },
+  mutate: {
+    errorPolicy: 'ignore',
+  },
+};
+
+
+
+//
+// use local router IP so you can test on the same wifi from a real device.
+const httpLink = new HttpLink({ uri: 'http://localhost:8081/graphql/' });
+
+let token;
+
+const withToken = setContext(async request => {
+   if (!token) {
+     token = await AsyncStorage.getItem('userToken');
+   }
+  return {
+    headers: {
+      //authorization: token
+      //username:'vetted', pwd:'vetted01',
+      //Authorization: token
+    }
+  };
+});
+
+// const resetToken = onError(({ networkError }) => {
+//   console.log('networkError - '+networkError)
+
+//   if (networkError && networkError.statusCode === 401) {
+//     // remove cached token on 401 from the server
+//     token = undefined;
+//   }
+// });
+
+const link1 = onError(({ graphQLErrors, networkError }) => {
+  if (graphQLErrors)
+    graphQLErrors.map(({ message, locations, path }) =>
+      console.log(
+        `[GraphQL error]: Message: ${message}, Location: ${locations}, Path: ${path}`,
+      ),
+    );
+
+  if (networkError) console.log(`[Network error]: ${networkError}`);
+});
+
+const authFlowLink = withToken.concat(link1);
+
+const link = authFlowLink.concat(httpLink);
+//
+
+const client = new ApolloClient({
+  cache: cache,
+  link: link,
+  defaultOptions: defaultOptions
+});
+
+persistCache({
+  cache,
+  storage: AsyncStorage,
+  defaultOptions,
+  debug:true,
+  maxSize:false
+});
+
 // create our store
 const store = createStore()
 
@@ -21,9 +105,11 @@ const store = createStore()
 class App extends Component {
   render () {
     return (
+      <ApolloProvider client={client}>
       <Provider store={store}>
         <RootContainer />
       </Provider>
+      </ApolloProvider>
     )
   }
 }
@@ -32,6 +118,4 @@ class App extends Component {
 // export default DebugConfig.useReactotron
 //   ? console.tron.overlay(App)
 //   : App
-export default graphql(getUserInfo,{
-  
-})(App)
+export default App
